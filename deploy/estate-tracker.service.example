@@ -1,0 +1,36 @@
+# Szablon usługi systemd. Podmień:
+#   INSTALL_DIR   — katalog z programem (np. /srv/estate-tracker)
+#   SERVICE_USER  — użytkownik systemowy, na którym działa program
+#   NODE_BIN      — ścieżka do node (`which node`)
+# Gotowe polecenie w README (sekcja „Instalacja jako usługa systemd”).
+[Unit]
+Description=estate-tracker - monitor ogłoszeń nieruchomości z alertami na Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=SERVICE_USER
+Group=SERVICE_USER
+WorkingDirectory=INSTALL_DIR
+ExecStart=NODE_BIN INSTALL_DIR/src/index.js
+# Opcjonalne zmienne (PORT, HOST, PANEL_USER, PANEL_PASSWORD, TELEGRAM_BOT_TOKEN, ...)
+EnvironmentFile=-/etc/estate-tracker.env
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=10
+
+# Utwardzenie: program może pisać tylko do katalogu data/
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=INSTALL_DIR/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

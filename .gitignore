@@ -1,0 +1,7 @@
+node_modules/
+data/*.json
+data/*.tmp
+deploy/estate-tracker.env
+deploy/private/
+dist/
+.DS_Store

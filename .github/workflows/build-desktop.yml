@@ -1,0 +1,72 @@
+# Builds the Estate Tracker desktop app for Windows and macOS.
+#  - run manually: GitHub → Actions → "Zbuduj aplikację desktopową" → Run workflow
+#    (files land under the run's "Artifacts")
+#  - push a tag like v1.0.1: the same build + a GitHub Release with the files attached
+#    (the app's "new version" check looks at the latest Release)
+name: Zbuduj aplikację desktopową
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            files: |
+              dist/*.exe
+          - os: macos-latest
+            script: dist:mac
+            files: |
+              dist/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalacja zależności
+        run: npm ci
+
+      - name: Budowanie (${{ matrix.script }})
+        run: npm run ${{ matrix.script }}
+        env:
+          # no code-signing certificate: build unsigned (macOS gets an ad-hoc signature)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: estate-tracker-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Wydanie na GitHubie
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Estate Tracker ${{ github.ref_name }}
+          files: out/*
+          body: |
+            **Windows:** `…-instalator-Windows.exe` (instalacja) albo `…-portable-Windows.exe` (bez instalacji).
+            **macOS (Apple Silicon i Intel):** `…-mac.dmg`.
+            Instrukcja instalacji: plik INSTRUKCJA-DLA-WSPOLNIKOW.md w repozytorium.
