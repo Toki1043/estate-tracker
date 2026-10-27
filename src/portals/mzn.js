@@ -79,7 +79,7 @@ function levelOf(description) {
   if (first === 'powiat') return 'county';
   if (first === 'województwo') return 'region';
   if (first === 'ulica') return 'street';
-  if (first.includes('dzielnica') || first.includes('osiedle') || first.includes('część')) return 'district';
+  if (first.includes('dzielnic') || first.includes('osiedle') || first.includes('część')) return 'district'; // also "obszar w dzielnicy"
   return first || 'other';
 }
 

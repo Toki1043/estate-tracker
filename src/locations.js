@@ -102,44 +102,6 @@ function choose(cands, entry, ctx = {}) {
   return { ...c, approx: approx || (entry.wantCommune && c.level !== 'commune'), ambiguous };
 }
 
-/**
- * The "anchor" is a portal-independent pick for each entry (from Gratka, which returns
- * coordinates plus commune/county/voivodeship). Other portals are matched against it.
- */
-async function resolveAnchors(entries, regionHint, known = []) {
-  const sources = [portals.byId.gratka, portals.byId.morizon, portals.byId.otodom];
-  const out = new Array(entries.length).fill(null);
-  const candsPer = [];
-  for (const [i, e] of entries.entries()) {
-    let cands = null;
-    if (known[i]) {
-      candsPer.push([]);
-      continue;
-    }
-    for (const src of sources) {
-      try {
-        cands = await cachedSuggest(src, e.name);
-        break;
-      } catch {}
-    }
-    candsPer.push(cands || []);
-  }
-  const hintsFor = (e) => [regionHint, e.hint].filter(Boolean);
-  // Pass 1: entries that have only one sensible candidate.
-  entries.forEach((e, i) => {
-    if (known[i]) return;
-    const exact = candsPer[i].filter((c) => norm(c.name) === norm(e.name) && c.level === (e.wantCommune ? 'commune' : 'town'));
-    if (exact.length === 1 || hintsFor(e).length) out[i] = choose(candsPer[i], e, { hints: hintsFor(e) });
-  });
-  // Pass 2: ambiguous names are pulled toward the centroid of the already-resolved ones.
-  const pts = [...out, ...known].filter((x) => x && x.lat != null);
-  const centroid = pts.length ? { lat: pts.reduce((s, p) => s + p.lat, 0) / pts.length, lon: pts.reduce((s, p) => s + p.lon, 0) / pts.length } : null;
-  entries.forEach((e, i) => {
-    if (!out[i] && !known[i]) out[i] = choose(candsPer[i], e, { hints: hintsFor(e), centroid });
-  });
-  return out.map((a, i) => known[i] || (a ? { lat: a.lat, lon: a.lon, label: a.label, tokens: [norm(a.name), ...contextTokens(a.context)] } : null));
-}
-
 // Everything that can change the portal URLs (client-side-only fields are harmless here:
 // a changed URL is baselined again anyway, an unchanged one keeps its history).
 const NOT_IN_HASH = new Set(['id', 'name', 'enabled', 'telegramThreadId', 'keywordsRequired', 'keywordsExcluded', 'createdAt', 'updatedAt', 'zoning', 'houseStates', 'minWidth', 'garage']);
@@ -155,20 +117,49 @@ async function resolveSearch(search, { force = false } = {}) {
   if (!force && cached && cached.hash === hash && Date.now() - cached.at < SUGGEST_TTL_MS && !cached.hasErrors) return cached;
 
   const { locations, pins } = effectiveLocations(search);
-  const entries = locations.map(parseEntry).filter((e) => e.name);
-  // A town picked from the autocomplete (or found in a drawn area) is the most reliable reference point.
-  const known = entries.map((e) => {
+  const all = locations.map(parseEntry).filter((e) => e.name);
+  // Only towns picked from the list (with their commune and county) or found in a drawn area are
+  // searched. A bare name is never guessed: the panel asks to pick it from the list.
+  const unresolved = [];
+  const entries = [];
+  const known = [];
+  for (const e of all) {
     const pin = pins.find((p) => norm(p.query) === norm(e.raw) && p.lat != null);
-    return pin ? { lat: pin.lat, lon: pin.lon, label: pin.label, tokens: [norm(pin.name || e.name), ...contextTokens(pin.context)], fromArea: !!pin.fromArea } : null;
-  });
-  const anchors = await resolveAnchors(entries, search.regionHint, known);
+    if (!pin) {
+      unresolved.push({ query: e.raw, reason: 'nie wybrano z listy — nazwa może pasować do kilku miejscowości' });
+      continue;
+    }
+    const t = pin.teryt;
+    if (t?.level === 'commune') e.wantCommune = true;
+    entries.push(e);
+    known.push({
+      lat: pin.lat,
+      lon: pin.lon,
+      label: t?.label || pin.label,
+      extentKm: t?.extentKm ?? (pin.fromArea ? 1 : 1.5),
+      teryt: !!t,
+      tokens: [norm(pin.name || e.name), ...(t ? [t.gmina, t.powiat, t.city].filter(Boolean).map(norm) : contextTokens(pin.context))],
+      fromArea: !!pin.fromArea,
+    });
+  }
+  const anchors = known;
   const hasAreas = (search.areas || []).length > 0;
   const result = {
     hash,
     at: Date.now(),
     portals: {},
     hasErrors: false,
-    anchors: entries.map((e, i) => ({ query: e.raw, name: e.name, lat: anchors[i]?.lat ?? null, lon: anchors[i]?.lon ?? null, label: anchors[i]?.label || e.raw, fromArea: !!known[i]?.fromArea })),
+    unresolved,
+    anchors: entries.map((e, i) => ({
+      query: e.raw,
+      name: e.name,
+      lat: anchors[i].lat,
+      lon: anchors[i].lon,
+      label: anchors[i].label || e.raw,
+      extentKm: anchors[i].extentKm,
+      tokens: anchors[i].tokens,
+      fromArea: anchors[i].fromArea,
+    })),
   };
 
   for (const portal of portals.list) {
@@ -188,9 +179,10 @@ async function resolveSearch(search, { force = false } = {}) {
           pr.locations.push({ query: e.raw, ok: false, error: 'portal nie zna tej miejscowości' });
           continue;
         }
-        // Sanity check: a pick far from the anchor is almost surely a different town with the same name.
+        // Sanity check: a pick far from the chosen town is almost surely a different town with the same name.
         const dist = haversine(anchors[i], pick);
-        if (dist !== null && dist > 40 && !hints.length) {
+        const maxKm = anchors[i].teryt ? Math.max(15, anchors[i].extentKm + 10) : 40;
+        if (dist !== null && dist > maxKm) {
           pr.locations.push({ query: e.raw, ok: false, error: `najbliższe dopasowanie „${pick.label}” jest ${Math.round(dist)} km od właściwej miejscowości` });
           continue;
         }

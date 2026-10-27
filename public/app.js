@@ -344,7 +344,9 @@
   }
 
   function searchCard(s) {
-    const locs = (s.locations.slice(0, 4).join(', ') + (s.locations.length > 4 ? ` +${s.locations.length - 4}` : '')) || (s.areas?.length ? 'obszar narysowany na mapie' : '');
+    const locLabel = (q) => s.locationPins.find((p) => p.query === q)?.teryt?.label || q;
+    const locs = (s.locations.slice(0, 4).map(locLabel).join(', ') + (s.locations.length > 4 ? ` +${s.locations.length - 4}` : '')) || (s.areas?.length ? 'obszar narysowany na mapie' : '');
+    const unpicked = s.resolved?.unresolved?.length ? `<div class="notice small" style="margin:8px 0 0">⚠ Nie sprawdzane, bo nazwa może oznaczać kilka miejscowości: <b>${esc(s.resolved.unresolved.map((u) => u.query).join(', '))}</b>. <a href="#/search/${esc(s.id)}">Wybierz właściwe z listy</a>.</div>` : '';
     const dots = META.portals
       .map((p) => {
         const d = s.dots[p.id];
@@ -378,6 +380,7 @@
           </div>
           <label class="switch" title="Włącz / wyłącz"><input type="checkbox" class="s-toggle" data-id="${esc(s.id)}" ${s.enabled ? 'checked' : ''}><span class="track"></span></label>
         </div>
+        ${unpicked}
         <div class="chips">${filterChips(s)}</div>
         <div class="s-stats">
           <div class="stat"><b>${s.offers.matching}</b><span>pasujących ofert</span></div>
@@ -506,12 +509,6 @@
     delete f.coverage;
     delete f.resolved;
     let dirtyName = !!existing;
-    // Searches from the first version have no pins: use the towns already recognised on the server.
-    for (const a of existing?.resolved?.anchors || []) {
-      if (a.lat !== null && f.locations.includes(a.query) && !f.locationPins.some((p) => p.query === a.query)) {
-        f.locationPins.push({ query: a.query, name: a.name, label: a.label, context: '', lat: a.lat, lon: a.lon });
-      }
-    }
 
     app.innerHTML = `
       <div class="page-head"><h1>${existing ? `Edycja: ${esc(existing.name)}` : 'Nowe wyszukiwanie'}</h1></div>
@@ -766,13 +763,25 @@
       }
     }
     function renderChips() {
+      const pinIc = ICON.pin.replace('class="ic"', 'class="ic" style="width:13px;height:13px"');
       $('#locChips').innerHTML =
         f.locations
           .map((q) => {
             const pin = f.locationPins.find((p) => p.query === q);
-            return `<span class="chip ${pin ? 'accent' : ''}" title="${esc(pin?.label || 'bez podpowiedzi — rozpoznawana po nazwie')}">${ICON.pin.replace('class="ic"', 'class="ic" style="width:13px;height:13px"')}${esc(q)}<button type="button" data-q="${esc(q)}" aria-label="usuń">×</button></span>`;
+            if (!pin) return `<span class="chip warn" title="Ta nazwa może oznaczać kilka miejscowości — nie będzie sprawdzana, dopóki nie wybierzesz właściwej">⚠ ${esc(q)} <a href="#" class="loc-choose" data-q="${esc(q)}">wybierz z listy</a><button type="button" data-q="${esc(q)}" aria-label="usuń">×</button></span>`;
+            const label = pin.teryt?.label || pin.label || q;
+            const codes = pin.teryt?.codes ? `TERYT: gmina ${pin.teryt.terc || '—'}${pin.teryt.simc ? `, miejscowość ${pin.teryt.simc}` : ''}` : 'gmina i powiat zostaną ustalone po zapisaniu';
+            return `<span class="chip accent" title="${esc(codes)}">${pinIc}${esc(label)}${pin.teryt ? '' : ' <span class="spinner" style="width:10px;height:10px"></span>'}<button type="button" data-q="${esc(q)}" aria-label="usuń">×</button></span>`;
           })
           .join('') || '<span class="small muted">Dodaj miejscowość albo narysuj obszar na mapie.</span>';
+      $$('#locChips .loc-choose').forEach((a) =>
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          input.value = a.dataset.q;
+          input.focus();
+          suggest(a.dataset.q);
+        })
+      );
       $$('#locChips button').forEach((b) =>
         b.addEventListener('click', () => {
           f.locations = f.locations.filter((x) => x !== b.dataset.q);
@@ -784,29 +793,56 @@
         })
       );
     }
-    function addLocation(item) {
-      let query = item.name;
-      if (f.locations.includes(query)) {
-        const same = f.locationPins.find((p) => p.query === query);
-        if (same && Math.abs(same.lat - item.lat) < 0.01 && Math.abs(same.lon - item.lon) < 0.01) return;
-        const county = (item.context || '').split(',').map((x) => x.trim())[2] || (item.context || '').split(',').pop().trim();
-        query = `${item.name} (${county})`;
-        if (f.locations.includes(query)) return;
+    /** item: an entry of the list (or a town from OpenStreetMap); teryt: its commune/county, if known. */
+    function addLocation(item, teryt = null) {
+      let query = item.level === 'commune' ? `gmina ${item.name}` : item.name;
+      const old = f.locations.find((q) => q.toLowerCase() === query.toLowerCase());
+      if (old) {
+        const same = f.locationPins.find((p) => p.query === old);
+        if (!same) {
+          // a name typed earlier without picking: replace it with the picked town
+          f.locations = f.locations.filter((q) => q !== old);
+        } else {
+          if (Math.abs(same.lat - item.lat) < 0.01 && Math.abs(same.lon - item.lon) < 0.01) return;
+          query = `${query} (${teryt?.powiat || (item.context || '').split(',').map((x) => x.trim()).slice(-2)[0] || 'inna'})`;
+          if (f.locations.includes(query)) return;
+        }
       }
       f.locations.push(query);
-      if (item.lat !== undefined && item.lat !== null) f.locationPins.push({ query, name: item.name, label: item.label || item.name, context: item.context || '', lat: item.lat, lon: item.lon });
+      f.locationPins.push({ query, name: item.name, label: teryt?.label || item.label || item.name, context: item.context || '', lat: item.lat, lon: item.lon, ...(teryt ? { teryt } : {}) });
       renderChips();
       drawMap();
       autoName();
       changed();
     }
+    // the commune, county and TERYT codes of a picked town (OpenStreetMap, a few seconds)
+    async function pickTown(item) {
+      const box = $('#locChips');
+      const wait = document.createElement('span');
+      wait.className = 'chip';
+      wait.innerHTML = `<span class="spinner" style="width:10px;height:10px"></span> ${esc(item.name)} — ustalam gminę i powiat…`;
+      box.appendChild(wait);
+      let t = null;
+      try {
+        t = await api('POST', '/locations/describe', { name: item.name, level: item.level, context: item.context, lat: item.lat, lon: item.lon });
+      } catch (e) {
+        toast(`Nie udało się ustalić gminy i powiatu (${e.message}) — zostaną ustalone po zapisaniu.`, true);
+      }
+      if (!alive.current()) return;
+      wait.remove();
+      addLocation(item, t && t.name ? t : null);
+    }
     const input = $('#locInput');
     const list = $('#locList');
     let acItems = [];
     let acIndex = -1;
+    let acNote = '';
+    const fold = (s) => String(s || '').toLowerCase().replace(/ł/g, 'l').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     const showAc = () => {
       list.classList.toggle('hidden', !acItems.length);
-      list.innerHTML = acItems.map((x, i) => `<div class="ac-item ${i === acIndex ? 'active' : ''}" data-i="${i}"><b>${esc(x.name)}</b><small>${esc(x.context || '')}</small></div>`).join('');
+      list.innerHTML =
+        (acNote ? `<div class="ac-note">${esc(acNote)}</div>` : '') +
+        acItems.map((x, i) => `<div class="ac-item ${i === acIndex ? 'active' : ''}" data-i="${i}"><b>${esc(x.level === 'commune' ? `gmina ${x.name}` : x.name)}</b><small>${esc((x.display || x.context || '').replace(/^[^—]*—\s*/, ''))}</small></div>`).join('');
       $$('.ac-item', list).forEach((el) =>
         el.addEventListener('mousedown', (e) => {
           e.preventDefault();
@@ -817,26 +853,35 @@
     const pick = (i) => {
       const x = acItems[i];
       if (!x) return;
-      addLocation(x);
       input.value = '';
       acItems = [];
+      acNote = '';
       showAc();
+      pickTown(x);
     };
-    const suggest = debounce(async () => {
-      const q = input.value.trim();
+    async function loadSuggestions(q) {
+      try {
+        return await api('GET', `/locations/suggest?q=${encodeURIComponent(q)}`);
+      } catch {
+        return [];
+      }
+    }
+    async function suggest(forName) {
+      const q = (forName || input.value).trim();
       if (q.length < 2) {
         acItems = [];
         return showAc();
       }
-      try {
-        acItems = await api('GET', `/locations/suggest?q=${encodeURIComponent(q)}`);
-      } catch {
-        acItems = [];
-      }
+      acItems = await loadSuggestions(q);
+      if (!alive.current()) return;
+      const same = acItems.filter((x) => fold(x.name) === fold(q));
+      acNote = forName && same.length > 1 ? `Jest ${same.length} miejscowości „${q}” — wybierz właściwą:` : '';
+      if (forName && same.length) acItems = [...same, ...acItems.filter((x) => !same.includes(x))];
       acIndex = acItems.length ? 0 : -1;
       showAc();
-    }, 250);
-    input.addEventListener('input', suggest);
+    }
+    const suggestSoon = debounce(() => suggest(), 250);
+    input.addEventListener('input', suggestSoon);
     input.addEventListener('blur', () => setTimeout(() => list.classList.add('hidden'), 150));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -845,11 +890,20 @@
         showAc();
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        if (acItems.length && acIndex >= 0) pick(acIndex);
-        else if (input.value.trim()) {
-          addLocation({ name: input.value.trim() });
-          input.value = '';
-        }
+        const q = input.value.trim();
+        if (!q) return;
+        (async () => {
+          const items = await loadSuggestions(q);
+          const same = items.filter((x) => fold(x.name) === fold(q) && x.level !== 'district');
+          const towns = same.filter((x) => x.level === 'town');
+          if (towns.length === 1 && same.length === 1) {
+            acItems = towns;
+            return pick(0);
+          }
+          if (!items.length) return toast(`Nie znam miejscowości „${q}” — sprawdź pisownię i wybierz z podpowiedzi.`, true);
+          // several towns with this name (or only similar ones): the user picks, nothing is guessed
+          suggest(q);
+        })();
       } else if (e.key === 'Escape') {
         acItems = [];
         showAc();
@@ -891,7 +945,7 @@
         $('#nbAll').addEventListener('click', () => $$('.nearby-list input', box).forEach((c) => (c.checked = true)));
         $('#nbAdd').addEventListener('click', () => {
           const chosen = $$('.nearby-list input:checked', box).map((c) => items[Number(c.dataset.i)]);
-          for (const x of chosen) addLocation({ name: x.name, label: `${x.name} (OSM, ${num(x.distance, 1)} km)`, context: '', lat: x.lat, lon: x.lon });
+          for (const x of chosen) addLocation({ name: x.name, level: 'town', label: `${x.name} (OSM, ${num(x.distance, 1)} km)`, context: '', lat: x.lat, lon: x.lon });
           box.classList.add('hidden');
           toast(`Dodano ${chosen.length} miejscowości`);
         });
@@ -1047,6 +1101,8 @@
 
     $('#saveBtn').addEventListener('click', async () => {
       if (!f.locations.length && !f.areas.length) return toast('Dodaj miejscowość albo narysuj obszar.', true);
+      const unpicked = f.locations.filter((q) => !f.locationPins.some((p) => p.query === q));
+      if (unpicked.length) return toast(`Wybierz z listy, o którą miejscowość chodzi: ${unpicked.join(', ')}`, true);
       if (!Object.values(f.portals).some(Boolean)) return toast('Wybierz co najmniej jeden portal.', true);
       try {
         if (existing) await api('PUT', `/searches/${existing.id}`, f);

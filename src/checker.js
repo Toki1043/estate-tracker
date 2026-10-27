@@ -14,6 +14,7 @@ const offersStore = require('./offers');
 const events = require('./events');
 const { sleep, randInt, escapeHtml, norm } = require('./util');
 const geo = require('./geo');
+const geoguard = require('./geoguard');
 
 const MAX_SEEN_PER_SEARCH = 4000;
 const MAX_ALERT_LOG = 300;
@@ -40,6 +41,7 @@ async function collect(search, { preview = false, forceResolve = false } = {}) {
   const resolved = await resolveSearch(search, { force: forceResolve });
   // Town reference points, needed by the drawn-area check (kept off the saved object).
   Object.defineProperty(search, '_anchors', { value: resolved.anchors || [], configurable: true, writable: true, enumerable: false });
+  Object.defineProperty(search, '_guard', { value: geoguard.build(search, resolved.anchors), configurable: true, writable: true, enumerable: false });
   const out = { resolved, portals: {} };
   for (const portal of portals.list) {
     if (!search.portals?.[portal.id]) continue;
@@ -65,10 +67,14 @@ async function collect(search, { preview = false, forceResolve = false } = {}) {
             if (d.lat != null) Object.assign(x, { lat: d.lat, lon: d.lon, exactCoords: d.exactCoords });
             x.detailAt = d.at;
           }
-          evaluate(x, search);
-          approxCoords(x, resolved.anchors);
           return x;
         });
+        // Offers without coordinates: the town they name, for the distance check and the map.
+        await geoguard.locate(tr.offers, search._guard);
+        for (const x of tr.offers) {
+          evaluate(x, search);
+          approxCoords(x, resolved.anchors);
+        }
       } catch (e) {
         tr.error = e.message;
         tr.status = e.status || null;
@@ -86,8 +92,11 @@ function evaluate(o, search) {
   o.features = features.compute(o, search.propertyType);
   const chk = features.check(o.features, search, o.portal);
   const area = chk.reject ? {} : areaCheck(o, search, search._anchors || []);
-  o.reject = rejectReason(o, search) || chk.reject || area.reject || null;
-  o.unverified = o.reject ? [] : [...chk.unverified, ...(area.note ? [area.note] : [])];
+  // Radius + 5 km from the chosen towns / areas, whatever the portal returned.
+  const where = geoguard.verdict(o, search._guard);
+  o.geoReject = where.reject || null;
+  o.reject = where.reject || rejectReason(o, search) || chk.reject || area.reject || null;
+  o.unverified = o.reject ? [] : [...chk.unverified, ...(area.note ? [area.note] : []), ...(where.note ? [where.note] : [])];
   o.featureSummary = features.summary(o.features);
   return o;
 }
@@ -125,7 +134,12 @@ function areaCheck(o, s, anchors) {
 
 /** Without coordinates from the portal, place the offer at its town (marked as approximate). */
 function approxCoords(o, anchors) {
-  if (o.lat != null || !anchors?.length) return;
+  if (o.lat != null) return;
+  if (o.geoRef) {
+    Object.assign(o, { lat: o.geoRef.lat, lon: o.geoRef.lon, exactCoords: false, approxCoords: true });
+    return;
+  }
+  if (!anchors?.length) return;
   const loc = ` ${norm(o.location)} ${norm(o.title)} `;
   const a = anchors.find((x) => x.lat != null && loc.includes(` ${norm(x.name)} `)) || anchors.find((x) => x.lat != null);
   if (!a) return;
@@ -216,6 +230,10 @@ async function checkSearch(search, runStats) {
       }
       rs.ok++;
       rs.offers += t.offers.length;
+      const far = t.offers.filter((o) => o.geoReject).length;
+      if (far >= 5 && far / t.offers.length >= 0.5) {
+        log(`[${search.name}] ${pid} „${t.label}”: ${far}/${t.offers.length} ofert spoza obszaru — portal prawdopodobnie zignorował lokalizację; odrzucone, bez alertów.`);
+      }
       rs.reportedTotal += t.total || 0;
       let baseline = !state.baselines[t.key];
       // Guard: when most of a known list suddenly looks "new", the portal probably changed its ids
@@ -402,6 +420,7 @@ async function runAll(reason = 'harmonogram') {
     return running;
   }
   running = (async () => {
+    await require('./migrate').ready();
     const searches = store.load('searches', []).map(normalize).filter((s) => s.enabled);
     const started = Date.now();
     log(`=== Przebieg (${reason}): ${searches.length} aktywnych wyszukiwań`);

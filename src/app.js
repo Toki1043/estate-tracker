@@ -31,6 +31,8 @@ function start({ host = '0.0.0.0', port = 3100, desktop = null } = {}) {
   });
   return new Promise((resolve, reject) => {
     const server = createApp({ desktop }).listen(port, host, () => {
+      // towns -> TERYT, distance re-check of saved offers (the first run waits for it)
+      require('./migrate').start();
       scheduler.start();
       resolve({ server, port: server.address().port });
     });

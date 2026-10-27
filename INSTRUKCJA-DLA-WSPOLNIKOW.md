@@ -39,7 +39,7 @@ Wersja *portable*: nic nie instalujesz — po prostu uruchamiasz plik `…-porta
 
 1. Po uruchomieniu od razu widzisz panel — nie trzeba się logować.
 2. **Dostałeś plik z wyszukiwaniami** (np. `estate-tracker-Dzialki….json`)? Kliknij **„Importuj”** na stronie *Wyszukiwania* i wybierz ten plik. Gotowe.
-   Możesz też dodać własne wyszukiwanie przyciskiem **„+ Nowe wyszukiwanie”**.
+   Możesz też dodać własne wyszukiwanie przyciskiem **„+ Nowe wyszukiwanie”**. Miejscowość wybierz z listy podpowiedzi — przy każdej widać gminę i powiat, bo wiele nazw powtarza się w Polsce.
 3. **Pierwsze sprawdzenie tylko zapamiętuje oferty, które już są** — powiadomienia przyjdą dopiero o ogłoszeniach dodanych później. To celowe, żeby nie zasypać Cię starymi ofertami.
 4. Sprawdź, czy powiadomienia działają: **Ustawienia → „Wyślij testowe powiadomienie”**. W rogu ekranu powinien pojawić się dymek.
 5. Kliknięcie powiadomienia otwiera ofertę w programie (zdjęcie, cena, mapa, przycisk „Otwórz na …” prowadzi do ogłoszenia).

@@ -102,16 +102,15 @@ Galeria wszystkich znalezionych ofert: zdjęcie, cena, m², zł/m², miejscowoś
 ### Mapa
 Leaflet + OpenStreetMap. Pinezka = dokładne położenie (z portalu albo ze strony ogłoszenia), kółko przerywane = położenie przybliżone (środek miejscowości), złota = ulubiona. Kliknięcie pokazuje zdjęcie, cenę i link.
 
-### Niejednoznaczne nazwy miejscowości
+### Miejscowości: gmina, powiat (TERYT) i kontrola odległości
 
-Wiele nazw powtarza się w Polsce — np. jest kilka miejscowości „Podłęże”. Program wybiera właściwą tak:
+Wiele nazw powtarza się w Polsce — np. jest kilka miejscowości „Witkowice” czy „Podłęże”. Dlatego:
 
-1. dokładne dopasowanie nazwy; miejscowość ma pierwszeństwo przed gminą/ulicą,
-2. podpowiedź regionu (pole *Region / powiat* albo zapis `Podłęże (wielicki)`),
-3. bliskość pozostałych miejscowości z listy (gdy na liście są też Niepołomice, wybrane zostanie Podłęże w gminie Niepołomice),
-4. na portalach ze współrzędnymi: odległość od tej samej miejscowości na innych portalach; dopasowanie odległe o >40 km jest odrzucane i pokazane na czerwono.
-
-Wybór jest widoczny w panelu (*wybrano: Podłęże → Podłęże, gm. Niepołomice, pow. wielicki…*). Całą gminę zapiszesz jako `gmina Niepołomice`.
+1. Miejscowość **wybierasz z listy podpowiedzi**, która pokazuje gminę, powiat i województwo. Program nie zgaduje: gdy nazwa (wpisana i zatwierdzona Enterem) pasuje do kilku miejscowości, pokazuje listę do wyboru. Nazwa z jedną pasującą miejscowością dodaje się od razu.
+2. Wybrana miejscowość jest przypisana do gminy i powiatu z kodami TERYT (TERC gminy, SIMC miejscowości — z OpenStreetMap/Nominatim). Chip pokazuje np. `Podłęże (gm. Niepołomice, pow. wielicki)`; kody są w podpowiedzi chipa. Całą gminę wybierasz pozycją „gmina …” z listy.
+3. Na każdym portalu użyta zostaje tylko ta miejscowość (dopasowanie dalej niż 15 km od wybranej jest odrzucane i pokazane na czerwono).
+4. **Kontrola odległości:** każda oferta musi leżeć najwyżej **promień + 5 km** od granicy wybranej miejscowości (albo od narysowanego obszaru). Oferta bez współrzędnych jest umiejscawiana w miejscowości podanej w ogłoszeniu (z jej gminą/powiatem). Oferty dalej są odrzucane z powodem „poza obszarem: … km od …” i nie trafiają do alertów — także wtedy, gdy portal zignoruje lokalizację i zwróci oferty z całej Polski (zdarzyło się to Gratce i Morizonowi).
+5. Stare wyszukiwania (zapisane przed tą zmianą) są uzupełniane automatycznie przy starcie; nazwy, których nie da się przypisać jednoznacznie, są oznaczone w panelu „wybierz z listy” i do tego czasu nie są sprawdzane. Zapisane oferty są przy tym przeliczane — bez wysyłania alertów.
 
 Wyniki rozpoznawania są keszowane (30 dni) w `data/geocache.json`; przycisk *Odśwież lokalizacje* wymusza ponowne sprawdzenie.
 

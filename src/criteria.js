@@ -1,6 +1,7 @@
 'use strict';
 
 const geo = require('./geo');
+const { norm } = require('./util');
 
 // Search criteria: defaults, migration of old searches, labels and how each portal handles each filter.
 
@@ -109,6 +110,15 @@ function normalize(raw) {
   s.keywordsExcluded = toKeywordList(s.keywordsExcluded);
   s.locations = (Array.isArray(s.locations) ? s.locations : String(s.locations || '').split(/[,\n;]/)).map((x) => String(x).trim()).filter(Boolean);
   s.locationPins = Array.isArray(s.locationPins) ? s.locationPins.filter((p) => p && p.query) : [];
+  // The same town typed twice ("wieliczka" + "Wieliczka"): keep one, preferably the one picked from the list.
+  const pinned = new Set(s.locationPins.map((p) => p.query));
+  const byName = new Map();
+  for (const q of s.locations) {
+    const k = norm(q);
+    if (!byName.has(k) || (!pinned.has(byName.get(k)) && pinned.has(q))) byName.set(k, q);
+  }
+  s.locations = [...byName.values()];
+  s.locationPins = s.locationPins.filter((p) => s.locations.includes(p.query));
   s.areas = geo.cleanAreas(s.areas);
   s.areaTowns = (Array.isArray(s.areaTowns) ? s.areaTowns : [])
     .filter((t) => t && t.name && Number.isFinite(Number(t.lat)) && Number.isFinite(Number(t.lon)))

@@ -48,6 +48,9 @@ for (const c of coverage(search)) console.log(`filtr ${c.label}: ${Object.entrie
 
 (async () => {
   await prepareAreas();
+  // like picking each town from the list in the panel (commune + county, TERYT)
+  search.locationPins = (await require('../src/migrate').pinTowns(search)).pins;
+  for (const p of search.locationPins) console.log(`miejscowość: ${p.teryt?.label || p.query}`);
   const r = await checker.collect(search, { preview: true });
   // Optionally read offer pages of the first N matching offers per portal (like for new offers).
   if (details) {

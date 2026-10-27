@@ -16,6 +16,8 @@ const geo = require('./geo');
 const criteria = require('./criteria');
 const { resolveSearch, forget, cachedSuggest } = require('./locations');
 const { uid, slug } = require('./util');
+const teryt = require('./teryt');
+const migrate = require('./migrate');
 
 const resolving = new Set();
 
@@ -80,14 +82,17 @@ function searchFromBody(body, prev = {}) {
     context: String(p.context || '').slice(0, 200),
     lat: Number(p.lat),
     lon: Number(p.lon),
+    ...(p.teryt ? { teryt: teryt.clean(p.teryt) } : {}),
   }));
   return s;
 }
 
+// TERYT for towns without it, portal URLs, then the distance re-check of saved offers.
 function startResolve(search, force = false) {
   if (resolving.has(search.id)) return;
   resolving.add(search.id);
-  resolveSearch(search, { force })
+  migrate
+    .refreshSearch(search.id, { force })
     .catch((e) => console.error(`[resolve] ${search.name}:`, e.message))
     .finally(() => resolving.delete(search.id));
 }
@@ -261,7 +266,8 @@ function createApp({ desktop = null } = {}) {
         resolved: r
           ? {
               at: r.at,
-              anchors: r.anchors || [],
+              anchors: (r.anchors || []).map(({ tokens, ...a }) => a),
+              unresolved: r.unresolved || [],
               portals: Object.fromEntries(Object.entries(r.portals).map(([pid, x]) => [pid, { error: x.error, locations: x.locations, targets: (x.targets || []).map((t) => ({ label: t.label, url: t.url })) }])),
             }
           : null,
@@ -371,8 +377,20 @@ function createApp({ desktop = null } = {}) {
         list
           .filter((x) => ['town', 'commune', 'district'].includes(x.level))
           .slice(0, 10)
-          .map((x) => ({ name: x.name, label: x.label, context: x.context, level: x.level, lat: x.lat, lon: x.lon }))
+          .map((x) => ({ name: x.name, label: x.label, context: x.context, level: x.level, lat: x.lat, lon: x.lon, display: teryt.longLabel(x) }))
       );
+    })
+  );
+
+  // A town picked from the list: its commune, county and TERYT codes (OpenStreetMap).
+  api.post(
+    '/locations/describe',
+    wrap(async (req, res) => {
+      const b = req.body || {};
+      const item = { name: String(b.name || '').trim().slice(0, 120), level: ['town', 'commune', 'district'].includes(b.level) ? b.level : 'town', context: String(b.context || '').slice(0, 200), lat: Number(b.lat), lon: Number(b.lon) };
+      if (!item.name || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return res.status(400).json({ error: 'Brak nazwy lub współrzędnych' });
+      const t = await teryt.describe(item);
+      res.json({ ...teryt.clean(t), lat: t.lat, lon: t.lon, error: t.error || null });
     })
   );
 

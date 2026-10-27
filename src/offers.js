@@ -50,6 +50,7 @@ function record(searchId, offers, { alerted = [] } = {}) {
         features: o.featureSummary || [],
         unverified: o.unverified || [],
         reject: o.reject || null,
+        geoReject: o.geoReject || null,
         match: !o.reject,
         firstSeen: prev.firstSeen || now,
         lastSeen: now,
@@ -89,6 +90,40 @@ function record(searchId, offers, { alerted = [] } = {}) {
       for (const r of removable.slice(0, recs.length - MAX_PER_SEARCH)) delete map[r.key];
     }
   });
+}
+
+/**
+ * Distance check applied to saved offers (most are never listed again, so a run would not fix them).
+ * verdicts: Map key -> { reject, ref }. Only marks offers as (not) matching — never alerts.
+ */
+function applyGeo(searchId, verdicts) {
+  const out = { rejected: 0, restored: 0 };
+  store.update(FILE, {}, (all) => {
+    const map = all[searchId];
+    if (!map) return;
+    for (const [key, v] of verdicts) {
+      const r = map[key];
+      if (!r) continue;
+      // offers without coordinates go on the map at the town they name
+      if (v.ref && !r.exactCoords) Object.assign(r, { lat: v.ref.lat, lon: v.ref.lon });
+      if (v.reject) {
+        if (!r.reject || r.reject === r.geoReject) {
+          if (r.match) out.rejected++;
+          r.reject = v.reject;
+          r.match = false;
+        }
+        r.geoReject = v.reject;
+      } else if (r.geoReject) {
+        if (r.reject === r.geoReject) {
+          r.reject = null;
+          r.match = true;
+          out.restored++;
+        }
+        r.geoReject = null;
+      }
+    }
+  });
+  return out;
 }
 
 function setStatus(searchId, key, status) {
@@ -134,4 +169,4 @@ function countsBySearch() {
   return out;
 }
 
-module.exports = { record, getDetail, setStatus, removeSearch, list, countsBySearch, keyOf };
+module.exports = { record, getDetail, applyGeo, setStatus, removeSearch, list, countsBySearch, keyOf };
