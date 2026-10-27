@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const store = require('./store');
@@ -174,15 +175,53 @@ function previewPayload(s, r) {
   };
 }
 
+// ---------- static files with cache-busting ----------
+// index.html links app.js/app.css as "?v=<content hash>" and the map libraries as "?v=<library version>".
+// A changed file gets a new URL, so the browser can never pair a cached app.js with a newer page
+// (or the other way round). Versioned URLs are cached for a year; the page itself and anything
+// requested without ?v= is revalidated on every load.
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const vendor = (pkg) => {
+  const root = path.join(__dirname, '..', 'node_modules', pkg);
+  return { dir: path.join(root, 'dist'), v: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version };
+};
+const VENDOR = { leaflet: vendor('leaflet'), geoman: vendor('@geoman-io/leaflet-geoman-free') };
+const hashCache = new Map();
+function fileHash(file) {
+  const { mtimeMs, size } = fs.statSync(file);
+  const hit = hashCache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.v;
+  const v = crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex').slice(0, 10);
+  hashCache.set(file, { mtimeMs, size, v });
+  return v;
+}
+function renderIndex() {
+  return fs
+    .readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+    .replace(/(href|src)="\/(app\.(?:js|css))"/g, (m, attr, file) => `${attr}="/${file}?v=${fileHash(path.join(PUBLIC_DIR, file))}"`)
+    .replace(/(href|src)="\/vendor\/(leaflet|geoman)\/([^"?]+)"/g, (m, attr, lib, file) => `${attr}="/vendor/${lib}/${file}?v=${VENDOR[lib].v}"`);
+}
+function sendIndex(req, res) {
+  res.set('Cache-Control', 'no-cache');
+  res.type('html').send(renderIndex());
+}
+const staticFiles = (dir) =>
+  express.static(dir, {
+    index: false,
+    cacheControl: false,
+    setHeaders: (res) => res.set('Cache-Control', res.req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache'),
+  });
+
 function createApp({ desktop = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(desktop ? tokenAuth(desktop.token) : basicAuth);
   app.use(express.json({ limit: '300kb' }));
   app.use(sameOrigin);
-  app.use('/vendor/leaflet', express.static(path.join(__dirname, '..', 'node_modules', 'leaflet', 'dist'), { maxAge: '7d' }));
-  app.use('/vendor/geoman', express.static(path.join(__dirname, '..', 'node_modules', '@geoman-io', 'leaflet-geoman-free', 'dist'), { maxAge: '7d' }));
-  app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html', maxAge: 0 }));
+  app.get(['/', '/index.html'], sendIndex);
+  app.use('/vendor/leaflet', staticFiles(VENDOR.leaflet.dir));
+  app.use('/vendor/geoman', staticFiles(VENDOR.geoman.dir));
+  app.use(staticFiles(PUBLIC_DIR));
 
   const api = express.Router();
   const wrap = (fn) => (req, res) =>
@@ -481,7 +520,7 @@ function createApp({ desktop = null } = {}) {
   app.use('/api', api);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Nie ma takiego zasobu' }));
   // Single-page app: every other path serves the shell.
-  app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+  app.get('*', sendIndex);
   return app;
 }
 

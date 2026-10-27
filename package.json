@@ -1,6 +1,6 @@
 {
   "name": "estate-tracker",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Monitor ogłoszeń nieruchomości (Otodom, OLX, Gratka, Morizon, Nieruchomosci-online) — serwer z alertami na Telegram i aplikacja desktopowa",
   "main": "electron/main.js",
   "type": "commonjs",

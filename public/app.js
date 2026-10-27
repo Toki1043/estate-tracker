@@ -137,7 +137,20 @@
 
   // ---------- router ----------
   let currentRoute = '';
+  // Every navigation gets a number. A page still waiting for the API when the user moves on
+  // must stop there; otherwise it writes its result (or its error) over the new page.
+  let routeSeq = 0;
+  class LeftPage extends Error {}
+  function pageGuard() {
+    const seq = routeSeq;
+    const alive = () => {
+      if (seq !== routeSeq) throw new LeftPage();
+    };
+    alive.current = () => seq === routeSeq; // for event handlers: check without throwing
+    return alive;
+  }
   async function route() {
+    const seq = ++routeSeq;
     cleanup.forEach((fn) => fn());
     cleanup = [];
     const hash = location.hash.replace(/^#\/?/, '');
@@ -152,6 +165,7 @@
     window.scrollTo(0, 0);
     try {
       if (!META) META = await api('GET', '/meta');
+      if (seq !== routeSeq) return;
       if (!parts[0]) await pageSearches(app);
       else if (parts[0] === 'search' && parts[1] === 'new') await pageForm(app, null);
       else if (parts[0] === 'search' && parts[1]) await pageForm(app, parts[1]);
@@ -163,6 +177,7 @@
       else if (parts[0] === 'offer' && parts[1] && parts[2]) await pageOffer(app, decodeURIComponent(parts[1]), decodeURIComponent(parts[2]));
       else app.innerHTML = '<div class="empty">Nie ma takiej strony.</div>';
     } catch (e) {
+      if (e instanceof LeftPage || seq !== routeSeq) return; // the user is already on another page
       app.innerHTML = `<div class="card bad">Błąd: ${esc(e.message)}</div>`;
     }
   }
@@ -170,6 +185,7 @@
 
   // ---------- searches ----------
   async function pageSearches(app) {
+    const alive = pageGuard();
     await refreshState();
     let blocked = false;
     if (META.desktop) {
@@ -177,6 +193,7 @@
         blocked = (await api('GET', '/desktop')).notificationsBlocked;
       } catch {}
     }
+    alive();
     const notice = META.desktop
       ? blocked
         ? `<div class="notice">🔕 ${notifBlockedText()} <a href="#/settings">Test powiadomień</a></div>`
@@ -469,11 +486,18 @@
     cleanup.push(() => map.remove());
     return map;
   }
+  // Runs fn once the page is laid out (maps need their final size); cancelled if the user leaves first.
+  function afterLayout(fn) {
+    const t = setTimeout(fn, 50);
+    cleanup.push(() => clearTimeout(t));
+  }
   const pinIcon = (cls = '') => L.divIcon({ className: '', html: `<div class="pin ${cls}"></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] });
 
   // ---------- search form ----------
   async function pageForm(app, id) {
+    const alive = pageGuard();
     await refreshState();
+    alive();
     const existing = id ? STATE.searches.find((s) => s.id === id) : null;
     if (id && !existing) throw new Error('Nie ma takiego wyszukiwania');
     const f = JSON.parse(JSON.stringify(existing || { ...META.defaults, name: '' }));
@@ -691,12 +715,12 @@
       box.innerHTML = '<span class="spinner"></span> Ustalam miejscowości w obszarze (OpenStreetMap)…';
       try {
         const found = await api('POST', '/locations/in-area', { areas: f.areas });
-        if (req !== areaReq) return;
+        if (req !== areaReq || !alive.current()) return;
         const prev = new Map((f.areaTowns || []).map((t) => [t.name, t.enabled]));
         // towns inside are on by default, towns only touching the edge are off until clicked
         f.areaTowns = found.map((t) => ({ ...t, enabled: prev.has(t.name) ? prev.get(t.name) : t.status === 'inside' }));
       } catch (e) {
-        if (req !== areaReq) return;
+        if (req !== areaReq || !alive.current()) return;
         toast(e.message, true);
       }
       renderAreaTowns();
@@ -1038,10 +1062,10 @@
     setTrans(f.transaction);
     renderChips();
     renderAreaTowns();
-    setTimeout(() => {
+    afterLayout(() => {
       map.invalidateSize();
       drawMap();
-    }, 50);
+    });
   }
 
   function previewSummary(r, compact) {
@@ -1071,13 +1095,16 @@
 
   // ---------- full preview of a saved search ----------
   async function pagePreview(app, id) {
+    const alive = pageGuard();
     await refreshState();
+    alive();
     const s = STATE.searches.find((x) => x.id === id);
     if (!s) throw new Error('Nie ma takiego wyszukiwania');
     app.innerHTML = `<div class="page-head"><h1>Podgląd: ${esc(s.name)}</h1><span class="spacer"></span><a class="btn" href="#/search/${esc(id)}">Edytuj</a></div>
       <div class="card" style="margin-bottom:16px"><div class="chips">${filterChips(s)}</div><p class="small muted" style="margin:10px 0 0">Aktualne wyniki z portali. Nic nie jest zapisywane, alerty nie są wysyłane. ✓ pasuje, ✕ odrzucona (z powodem).</p></div>
       <div id="pvOut"><div class="card"><span class="spinner"></span> Pobieram wyniki z portali (z odstępami między zapytaniami)…</div></div>`;
     const r = await api('POST', `/searches/${id}/preview`);
+    alive(); // the preview takes up to a minute; the user may have left meanwhile
     $('#pvOut').innerHTML = r.portals
       .map((p) => {
         const bad = p.locations.filter((l) => !l.ok);
@@ -1143,8 +1170,10 @@
   }
 
   async function pageOffers(app, query) {
+    const alive = pageGuard();
     await refreshState();
     await loadOffers();
+    alive();
     const fl = offerFilters();
     if (query.get('search')) fl.search = query.get('search');
     app.innerHTML = `
@@ -1241,8 +1270,10 @@
 
   // ---------- map ----------
   async function pageMap(app, query) {
+    const alive = pageGuard();
     await refreshState();
     await loadOffers();
+    alive();
     const sel = { search: query.get('search') || '', status: 'active', matching: true, ...store.get('map-filters', {}) };
     app.innerHTML = `
       <div class="page-head"><h1>Mapa ofert</h1><span class="muted" id="mapCount"></span></div>
@@ -1304,16 +1335,18 @@
       draw(true);
     };
     $$('.toolbar select, .toolbar input').forEach((el) => el.addEventListener('change', apply));
-    setTimeout(() => {
+    afterLayout(() => {
       map.invalidateSize();
       draw(true);
-    }, 50);
+    });
   }
 
   // ---------- single offer (opened from a system notification) ----------
   async function pageOffer(app, searchId, key) {
+    const alive = pageGuard();
     await refreshState();
     await loadOffers();
+    alive();
     const o = OFFERS.find((x) => x.searchId === searchId && x.key === key);
     if (!o) {
       app.innerHTML = '<div class="card empty"><div class="big">🔎</div><p>Tej oferty nie ma już w zapisanych (mogła zostać usunięta razem z wyszukiwaniem).</p><a class="btn" href="#/offers">Wszystkie oferty</a></div>';
@@ -1359,13 +1392,15 @@
         const st = { color: '#6366f1', weight: 2, dashArray: '6 4', fillOpacity: 0.04, interactive: false };
         (a.type === 'circle' ? L.circle(a.center, { radius: a.radius, ...st }) : L.polygon(a.points, st)).addTo(map);
       }
-      setTimeout(() => map.invalidateSize(), 50);
+      afterLayout(() => map.invalidateSize());
     }
   }
 
   // ---------- alerts ----------
   async function pageAlerts(app) {
+    const alive = pageGuard();
     const alerts = await api('GET', '/alerts');
+    alive();
     app.innerHTML = `<div class="page-head"><h1>Ostatnie alerty</h1><span class="muted">${alerts.length}</span></div>
       ${alerts.length ? `<div class="list">${alerts
         .map(
@@ -1380,7 +1415,9 @@
 
   // ---------- settings ----------
   async function pageSettings(app) {
+    const alive = pageGuard();
     const s = await api('GET', '/settings');
+    alive();
     app.innerHTML = `<div class="page-head"><h1>Ustawienia</h1></div>
       ${META.desktop ? `<div class="card section"><h2>Aplikacja</h2>
         <p class="small muted">Oferty są sprawdzane, gdy aplikacja działa. O nowych ofertach informują powiadomienia systemowe — kliknięcie otwiera ofertę w aplikacji.</p>
@@ -1422,6 +1459,7 @@
     showTg();
     if (META.desktop) {
       const d = await api('GET', '/desktop');
+      alive();
       $('#dBg').checked = !!d.runInBackground;
       $('#dAuto').checked = !!d.autostart;
       $('#dInfo').textContent = `Wersja ${d.version} · dane: ${d.dataDir}`;
