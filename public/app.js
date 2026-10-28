@@ -480,13 +480,59 @@
   }
 
   // ---------- leaflet helpers ----------
+  // Base maps: CARTO (light Voyager / Dark Matter, following the theme) when a CARTO key is set in Settings,
+  // otherwise the Geoportal topographic map (the orthophoto can be very slow and is patchy at small scales).
+  // Orthophoto and OpenStreetMap are always available.
+  const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+  const CARTO_URL = {
+    light: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  };
+  const darkMq = matchMedia('(prefers-color-scheme: dark)');
+  const isDark = () => (document.documentElement.dataset.theme || (darkMq.matches ? 'dark' : 'light')) === 'dark';
+  const cartoLayers = new Set();
+  const cartoUrl = () => `${CARTO_URL[isDark() ? 'dark' : 'light']}?key=${encodeURIComponent(META.cartoKey || '')}`;
+  const syncCarto = () => cartoLayers.forEach((l) => l.setUrl(cartoUrl()));
+  darkMq.addEventListener('change', syncCarto);
+  $('#themeToggle').addEventListener('click', syncCarto);
+
   function makeMap(el, opts = {}) {
     const map = L.map(el, { scrollWheelZoom: opts.scroll !== false, zoomControl: true }).setView(opts.center || [52.0, 19.4], opts.zoom || 6); // whole Poland until something is selected
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
-    cleanup.push(() => map.remove());
+    const carto = L.tileLayer(cartoUrl(), {
+      subdomains: 'abcd',
+      maxZoom: 20,
+      attribution: `${OSM_ATTR} &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>`,
+    });
+    const orto = L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution', {
+      layers: 'Raster',
+      format: 'image/jpeg',
+      version: '1.3.0',
+      crs: L.CRS.EPSG4326,
+      maxZoom: 20,
+      attribution: 'Ortofotomapa &copy; <a href="https://www.geoportal.gov.pl" target="_blank" rel="noopener">GUGiK / Geoportal</a>',
+    });
+    const topo = L.tileLayer.wms('https://mapy.geoportal.gov.pl/wss/service/img/guest/TOPO/MapServer/WMSServer', {
+      layers: 'Raster',
+      format: 'image/png',
+      version: '1.3.0',
+      crs: L.CRS.EPSG4326,
+      maxZoom: 20,
+      attribution: 'Mapa topograficzna &copy; <a href="https://www.geoportal.gov.pl" target="_blank" rel="noopener">GUGiK / Geoportal</a>',
+    });
+    // OSM tiles have no dark variant, so they keep the CSS invert in dark mode
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'tiles-invert', attribution: OSM_ATTR });
+    // CARTO tiles need a key (without one every tile says "API KEY REQUIRED")
+    const bases = META.cartoKey ? { carto, topo, orto, osm } : { topo, orto, osm };
+    const def = META.cartoKey ? 'carto' : 'topo';
+    (bases[store.get('basemap', def)] || bases[def]).addTo(map);
+    const names = { carto: 'Mapa (CARTO)', topo: 'Mapa topograficzna (Geoportal)', orto: 'Ortofotomapa (Geoportal)', osm: 'Mapa OpenStreetMap' };
+    L.control.layers(Object.fromEntries(Object.entries(bases).map(([k, l]) => [names[k], l])), null, { position: 'topright' }).addTo(map);
+    map.on('baselayerchange', (e) => store.set('basemap', Object.keys(bases).find((k) => bases[k] === e.layer) || def));
+    if (META.cartoKey) cartoLayers.add(carto);
+    cleanup.push(() => {
+      cartoLayers.delete(carto);
+      map.remove();
+    });
     return map;
   }
   // Runs fn once the page is laid out (maps need their final size); cancelled if the user leaves first.
@@ -1499,6 +1545,9 @@
         <label class="field"><span>Ostrzeż po N× 0 ofert</span><input type="number" min="1" id="sZero" value="${s.zeroOffersWarnAfter}"></label>
         <label class="field"><span>Ostrzeż po N× błędzie</span><input type="number" min="1" id="sErr" value="${s.errorWarnAfter}"></label>
         <label class="field"><span>Maks. alertów na przebieg</span><input type="number" min="1" id="sMax" value="${s.maxAlertsPerRun}"></label></div></div>
+      <div class="card section"><h2>Mapa</h2>
+        <p class="small muted">Darmowy klucz CARTO: <a href="https://carto.com/basemaps/apikey" target="_blank" rel="noopener">carto.com/basemaps/apikey</a> (bez konta, przychodzi e-mailem). Z kluczem domyślnym podkładem jest mapa CARTO (jasna lub ciemna zgodnie z motywem); bez klucza — mapa topograficzna z Geoportalu. Ortofotomapa i OpenStreetMap są zawsze do wyboru (prawy górny róg mapy).</p>
+        <div class="grid-2"><label class="field"><span>Klucz CARTO</span><input type="text" id="sCarto" value="${esc(s.map?.cartoKey || '')}" autocomplete="off" spellcheck="false" placeholder="brak — podkładem jest mapa topograficzna"></label></div></div>
       <div class="card section ${META.desktop ? 'hidden' : ''}"><h2>Panel</h2>
         <div class="grid-2"><label class="field"><span>Użytkownik</span><input type="text" id="sUser" value="${esc(s.panel.user)}"></label>
         <label class="field"><span>Nowe hasło (puste = bez zmian)</span><input type="password" id="sPass" autocomplete="new-password"></label></div></div>
@@ -1547,7 +1596,9 @@
           errorWarnAfter: $('#sErr').value,
           maxAlertsPerRun: $('#sMax').value,
           panel: { user: $('#sUser').value, password: $('#sPass').value },
+          map: { cartoKey: $('#sCarto').value },
         });
+        META.cartoKey = $('#sCarto').value.trim();
         toast('Zapisano ustawienia');
         if ($('#sPass').value) toast('Zapisano. Nowe hasło obowiązuje przy następnym logowaniu.');
       } catch (e) {

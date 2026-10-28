@@ -220,6 +220,11 @@ const staticFiles = (dir) =>
 function createApp({ desktop = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
+  // map tile servers (OSM) reject requests without a Referer: send the panel origin, never the path
+  app.use((req, res, next) => {
+    res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
   app.use(desktop ? tokenAuth(desktop.token) : basicAuth);
   app.use(express.json({ limit: '300kb' }));
   app.use(sameOrigin);
@@ -245,6 +250,7 @@ function createApp({ desktop = null } = {}) {
       houseTypes: criteria.HOUSE_TYPES.map(({ code, label }) => ({ code, label })),
       houseStates: criteria.HOUSE_STATES,
       defaults: criteria.DEFAULT_SEARCH,
+      cartoKey: settings.get().map.cartoKey,
     });
   });
 
@@ -454,7 +460,9 @@ function createApp({ desktop = null } = {}) {
       errorWarnAfter: Math.max(1, n(b.errorWarnAfter, cur.errorWarnAfter)),
       maxAlertsPerRun: Math.max(1, n(b.maxAlertsPerRun, cur.maxAlertsPerRun)),
       panel: { user: String(b.panel?.user || '').trim() || cur.panel.user },
+      map: { cartoKey: String(b.map?.cartoKey ?? cur.map.cartoKey).trim() },
     };
+    if (!/^[\w.-]{0,200}$/.test(patch.map.cartoKey)) return res.status(400).json({ error: 'Klucz CARTO: tylko litery, cyfry, - _ .' });
     const token = String(b.telegram?.botToken || '').trim();
     if (token && token !== '__set__') patch.telegram.botToken = token;
     if (String(b.panel?.password || '').trim()) patch.panel.password = String(b.panel.password).trim();

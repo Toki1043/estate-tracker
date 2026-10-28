@@ -100,7 +100,7 @@ Na mapie w sekcji Lokalizacja (narzędzia po lewej stronie): **wielokąt, prosto
 Galeria wszystkich znalezionych ofert: zdjęcie, cena, m², zł/m², miejscowość, portal (plus odnośniki do tej samej oferty na innych portalach), kiedy dodana, wykryte cechy. Filtrowanie (wyszukiwanie, portal, tekst, tylko pasujące, duplikaty), sortowanie (najnowsze, cena, zł/m², powierzchnia), oznaczanie ★ **ulubione** i **odrzuć** (znika z aktywnych).
 
 ### Mapa
-Leaflet + OpenStreetMap. Pinezka = dokładne położenie (z portalu albo ze strony ogłoszenia), kółko przerywane = położenie przybliżone (środek miejscowości), złota = ulubiona. Kliknięcie pokazuje zdjęcie, cenę i link.
+Leaflet. Podkład do wyboru w prawym górnym rogu mapy: **CARTO** (domyślny, gdy w Ustawieniach → Mapa jest wpisany darmowy klucz z [carto.com/basemaps/apikey](https://carto.com/basemaps/apikey); jasny lub ciemny zgodnie z motywem), **mapa topograficzna Geoportalu** (domyślna bez klucza), **ortofotomapa Geoportalu** i **OpenStreetMap**. Wybór jest zapamiętywany w przeglądarce. Panel wysyła `Referrer-Policy: strict-origin-when-cross-origin` — serwery kafelków OSM odrzucają żądania bez nagłówka Referer („403 Access blocked”). Pinezka = dokładne położenie (z portalu albo ze strony ogłoszenia), kółko przerywane = położenie przybliżone (środek miejscowości), złota = ulubiona. Kliknięcie pokazuje zdjęcie, cenę i link.
 
 ### Miejscowości: gmina, powiat (TERYT) i kontrola odległości
 

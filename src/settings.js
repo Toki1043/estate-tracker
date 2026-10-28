@@ -19,6 +19,7 @@ const DEFAULTS = {
   errorWarnAfter: 3, // ile przebiegów z rzędu z błędem = ostrzeżenie
   maxAlertsPerRun: 15, // bezpiecznik przed zalewem alertów
   panel: { user: 'admin', password: '' },
+  map: { cartoKey: '' }, // free CARTO basemap key (carto.com/basemaps/apikey); empty = Geoportal topographic map as the default base map
 };
 
 function merge(def, val) {

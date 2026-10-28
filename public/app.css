@@ -240,8 +240,9 @@ details.links[open] summary::before { content: "▾ "; }
 
 /* ---------- map ---------- */
 .map-page { height: calc(100vh - 160px); min-height: 420px; border-radius: var(--radius); border: 1px solid var(--line); overflow: hidden; box-shadow: var(--shadow); }
-:root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9); } }
+/* dark mode: CARTO switches to Dark Matter by itself; only OSM tiles get inverted */
+:root[data-theme="dark"] .leaflet-tile-pane .tiles-invert { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-tile-pane .tiles-invert { filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9); } }
 .leaflet-container { font: inherit; background: var(--surface-2); }
 .leaflet-popup-content-wrapper { border-radius: 12px; background: var(--surface); color: var(--text); }
 .leaflet-popup-tip { background: var(--surface); }
